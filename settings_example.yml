@@ -1,0 +1,19 @@
+# settings example. Fill out to your needs and rename to settings.yaml
+
+mqtt:
+  server: 127.0.0.1
+  port: 1883
+  topic: meshtastic/2
+  username: mqtt_username
+  password: mqtt_passwd
+
+meshtastic:
+  channel_keys:
+    - '1PG7OiApB1nwvP+rz05pAQ=='  # standard key
+
+sql:
+  server: 127.0.0.1
+  port: 5432
+  database: meshtastic
+  user: sql_username
+  password: sql_passwd
