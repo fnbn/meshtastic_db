@@ -3,96 +3,10 @@ import base64
 
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from meshtastic import protocols, mesh_pb2, portnums_pb2, KnownProtocol
-import google.protobuf.json_format
-from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.orm import sessionmaker
-
-from sql_tables import engine, MeshPacket, Node
+from meshtastic import protocols, mesh_pb2
 
 # init logging
 logger = logging.getLogger(__name__)
-
-
-# init database
-Session = sessionmaker(bind=engine)
-
-
-def on_mesh_packet_receive(mesh_packet):
-    assert isinstance(mesh_packet.encrypted, bytes), f"Expected bytes, but got {type(mesh_packet.encrypted)}"
-
-    session = Session()
-
-    session.add(
-        MeshPacket(
-            rx_time=mesh_packet.rx_time,
-            id=mesh_packet.id,
-            _from = mesh_packet.__getattribute__('from'),
-            to = mesh_packet.to,
-            channel = mesh_packet.channel,
-            #decoded = mesh_packet.decoded,
-            encrypted = mesh_packet.encrypted,
-            rx_snr = mesh_packet.rx_snr,
-            hop_limit = mesh_packet.hop_limit,
-            want_ack = mesh_packet.want_ack,
-            priority = mesh_packet.priority,
-            rx_rssi = mesh_packet.rx_rssi,
-            delayed = mesh_packet.delayed,
-            hop_start = mesh_packet.hop_start,
-            public_key = mesh_packet.public_key,
-            pki_encrypted = mesh_packet.pki_encrypted
-        )
-    )
-    session.commit()
-    session.close()
-
-
-def on_text_receive(mesh_packet_dict):
-    try:
-        asBytes = mesh_packet_dict['decoded']['payload']
-        mesh_packet_dict['decoded']['text'] = base64.b64decode(asBytes).decode('utf-8')
-    except Exception as e:
-        logger.error(f'Malformatted utf8 in text message: {e}')
-
-    return mesh_packet_dict
-
-
-def on_nodeinfo_receive(mesh_packet_dict):
-    session = Session()
-
-    node_data = mesh_packet_dict['decoded'][protocols[portnums_pb2.NODEINFO_APP].name]
-    node_data['id'] = int(node_data['id'][1:], 16)
-    stmt = insert(Node).values(**node_data)
-    stmt = stmt.on_conflict_do_update(
-        index_elements=['id'],
-        set_={col: getattr(stmt.excluded, col) for col in node_data if col != 'id'}
-    )
-    session.execute(stmt)
-    session.commit()
-    session.close()
-
-    return mesh_packet_dict
-
-
-# add some handlers for specific portnums (this is taken care of in meshtastic python package but not independent from interface)
-for portnum in protocols.keys():
-    protocols[portnum] = KnownProtocol(
-        name=protocols[portnum].name,
-        protobufFactory=protocols[portnum].protobufFactory,
-        onReceive=None  # remove all onReveive callbacks
-    )
-
-protocols[portnums_pb2.TEXT_MESSAGE_APP] = KnownProtocol(
-    name=protocols[portnums_pb2.TEXT_MESSAGE_APP].name,
-    protobufFactory=protocols[portnums_pb2.TEXT_MESSAGE_APP].protobufFactory,
-    onReceive=on_text_receive
-)
-
-protocols[portnums_pb2.NODEINFO_APP] = KnownProtocol(
-    name=protocols[portnums_pb2.NODEINFO_APP].name,
-    protobufFactory=protocols[portnums_pb2.NODEINFO_APP].protobufFactory,
-    onReceive=on_nodeinfo_receive
-)
 
 
 def transform_key(raw_keys=['1PG7OiApB1nwvP+rz05pAQ==']):
@@ -129,26 +43,6 @@ def decrypter_factory(key_bytes_list):
                 pass
         
         logger.info('Could not decrypt packet.')
-        return None
+        return mesh_packet
 
     return decrypt_payload
-
-
-def parse_packet(mesh_packet):
-    portnum = mesh_packet.decoded.portnum
-    mesh_packet_dict = google.protobuf.json_format.MessageToDict(mesh_packet)
-    try:
-        protocol_decoder = protocols[portnum]
-    except KeyError:
-        logger.warning(f'Unknown portnum {portnum}')
-        return mesh_packet_dict
-
-    if protocol_decoder.protobufFactory:
-        pb = protocol_decoder.protobufFactory() 
-        pb.ParseFromString(mesh_packet.decoded.payload)
-        p = google.protobuf.json_format.MessageToDict(pb)
-        mesh_packet_dict['decoded'][protocol_decoder.name] = p
-
-    if protocol_decoder.onReceive:
-        mesh_packet_dict = protocol_decoder.onReceive(mesh_packet_dict)
-    return mesh_packet_dict

@@ -1,10 +1,12 @@
-import json
 import sys
 import logging
 
 import yaml
 import paho.mqtt.client as mqtt
 from meshtastic import mqtt_pb2
+
+from sqlalchemy.orm import sessionmaker
+
 
 
 # init logging
@@ -22,7 +24,12 @@ if not logger.handlers:
 
 
 # load local modules after logging was initialized
-from meshtastic_functions import transform_key, decrypter_factory, parse_packet, on_mesh_packet_receive
+from meshtastic_functions import transform_key, decrypter_factory
+from sql_tables import engine, MeshPacket
+
+
+# init database
+Session = sessionmaker(bind=engine)
 
 
 # load settings
@@ -42,18 +49,12 @@ def on_message(decrypter):
             service_envelope.ParseFromString(msg.payload)
             mesh_packet = service_envelope.packet
             logger.info('---------------     received packet    ---------------')
+            decrypted_packet = decrypter(mesh_packet)
+            session = Session()
+            session.add(MeshPacket(decrypted_packet, session))
+            session.commit()
+            session.close()
             logger.info(mesh_packet)
-            logger.info(type(mesh_packet.decoded))
-            uuid = on_mesh_packet_receive(mesh_packet)
-
-
-            decrypted_payload = decrypter(mesh_packet)
-            if decrypted_payload:
-                mesh_packet_dict = parse_packet(decrypted_payload)
-                message_json = json.dumps(mesh_packet_dict, indent=4)
-                logger.info(message_json)
-            else:
-                logger.info('Got a message, but could not decrypt.')
     return handle_message
 
 
