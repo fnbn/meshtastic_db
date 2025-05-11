@@ -1,0 +1,120 @@
+---
+- name: Deploy Python Web App
+  hosts: python_app
+  become: yes
+  vars:
+    app_name: meshtastic_db
+    app_short_description: Subscribe to mqtt and store mesh packets in a psql database
+    repo_url: https://github.com/fnbn/meshtastic_db.git
+    app_dir: /opt/meshtastic_db
+    venv_dir: /opt/meshtastic_db/venv
+    app_user: meshtastic_db
+    app_service: meshtastic_db.service
+
+  tasks:
+
+  - name: Install Git on Debian/Ubuntu
+    ansible.builtin.apt:
+      name: git
+      state: present
+      update_cache: yes
+
+  - name: Ensure app user exists
+    ansible.builtin.user:
+      name: "{{ app_user }}"
+      system: yes
+      shell: /bin/false
+
+  - name: Ensure application directory exists
+    ansible.builtin.file:
+      path: "{{ app_dir }}"
+      state: directory
+      owner: "{{ app_user }}"
+      group: "{{ app_user }}"
+      mode: '0755'
+
+  - name: Ensure app_dir and everything in it is owned by app_user
+    ansible.builtin.file:
+      path: "{{ app_dir }}"
+      state: directory
+      owner: "{{ app_user }}"
+      group: "{{ app_user }}"
+      recurse: yes
+
+  - name: Check if the directory is already trusted
+    ansible.builtin.command:
+      cmd: git config --global --get safe.directory
+    become: yes
+    become_user: "{{ app_user }}"
+    register: git_safe_dirs
+    changed_when: false
+
+  - name: Allow Git to trust the repo directory
+    ansible.builtin.command:
+      cmd: git config --global --add safe.directory {{ app_dir }}
+    become: yes
+    become_user: "{{ app_user }}"
+    when: "app_dir not in git_safe_dirs.stdout_lines"
+
+  - name: Clone or update the repo
+    ansible.builtin.git:
+      repo: "{{ repo_url }}"
+      dest: "{{ app_dir }}"
+      version: main
+      update: yes
+      force: yes
+    become: yes
+    become_user: "{{ app_user }}"
+    notify: Restart {{ app_name }} service
+
+  - name: Ensure system-wide packaging module is present
+    ansible.builtin.apt:
+      name:
+        - python3-packaging
+        - python3-venv
+      state: present
+      update_cache: yes
+    become: yes
+
+  - name: Install dependencies
+    ansible.builtin.pip:
+      requirements: "{{ app_dir }}/requirements.txt"
+      virtualenv: "{{ venv_dir }}"
+      virtualenv_command: python3 -m venv
+    notify: Restart {{ app_name }} service
+
+  - name: Copy local settings.yml
+    ansible.builtin.copy:
+      src: ./settings.yml
+      dest: "{{ app_dir }}/src/settings.yml"
+      owner: "{{ app_user }}"
+      group: "{{ app_user }}"
+      mode: '0600'
+
+  - name: Create systemd service file
+    ansible.builtin.template:
+      src: systemd_pythonapp.j2
+      dest: "/etc/systemd/system/{{ app_service }}"
+      mode: '0644'
+      owner: root
+      group: root
+    notify:
+      - Reload systemd
+      - Restart {{ app_name }} service
+
+  - name: Ensure {{ app_name }} service is enabled and running
+    ansible.builtin.systemd:
+      name: "{{ app_service }}"
+      enabled: yes
+      state: started
+
+  handlers:
+
+  - name: Reload systemd
+    ansible.builtin.systemd:
+      daemon_reload: yes
+
+  - name: Restart {{ app_name }} service
+    ansible.builtin.systemd:
+      name: "{{ app_service }}"
+      state: restarted

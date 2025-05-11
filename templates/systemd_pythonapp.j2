@@ -1,0 +1,13 @@
+[Unit]
+Description={{ app_short_description }}
+After=network.target
+
+[Service]
+User={{ app_user }}
+WorkingDirectory={{ app_dir }}/src
+ExecStart={{ venv_dir }}/bin/python {{ app_dir }}/src/main.py
+Restart=always
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
