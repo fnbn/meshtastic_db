@@ -7,7 +7,6 @@
     app_short_description: Subscribe to mqtt and store mesh packets in a psql database
     repo_url: https://github.com/fnbn/meshtastic_db.git
     app_dir: /opt/meshtastic_db
-    venv_dir: /opt/meshtastic_db/venv
     app_user: meshtastic_db
     app_service: meshtastic_db.service
 
@@ -32,14 +31,6 @@
       owner: "{{ app_user }}"
       group: "{{ app_user }}"
       mode: '0755'
-
-  - name: Ensure app_dir and everything in it is owned by app_user
-    ansible.builtin.file:
-      path: "{{ app_dir }}"
-      state: directory
-      owner: "{{ app_user }}"
-      group: "{{ app_user }}"
-      recurse: yes
 
   - name: Check if the directory is already trusted
     ansible.builtin.command:
@@ -79,8 +70,10 @@
   - name: Install dependencies
     ansible.builtin.pip:
       requirements: "{{ app_dir }}/requirements.txt"
-      virtualenv: "{{ venv_dir }}"
+      virtualenv: "{{ app_dir }}/venv"
       virtualenv_command: python3 -m venv
+    become: yes
+    become_user: "{{ app_user }}"
     notify: Restart {{ app_name }} service
 
   - name: Copy local settings.yml

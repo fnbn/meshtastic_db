@@ -5,7 +5,7 @@ After=network.target
 [Service]
 User={{ app_user }}
 WorkingDirectory={{ app_dir }}/src
-ExecStart={{ venv_dir }}/bin/python {{ app_dir }}/src/main.py
+ExecStart={{ app_dir }}/venv/bin/python {{ app_dir }}/src/main.py
 Restart=always
 Environment=PYTHONUNBUFFERED=1
 
